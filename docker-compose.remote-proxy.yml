@@ -1,0 +1,220 @@
+# Docker Compose for Remote Proxy Architecture
+#
+# This sets up:
+# - A central management server (with database, admin UI, management APIs)
+# - Redis for caching
+# - Two remote proxy instances (no database access, communicate via internal APIs)
+#
+# Usage:
+#   docker-compose -f docker-compose.remote-proxy.yml up
+#
+# The central server is accessible at http://localhost:4000
+# Remote proxies are accessible at http://localhost:4001 and http://localhost:4002
+
+services:
+  #############################################
+  # Central Management Server
+  # - Has database access
+  # - Serves Admin UI
+  # - Exposes internal APIs for remote proxies
+  #############################################
+  central:
+    build:
+      context: .
+      args:
+        target: runtime
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm_central
+    volumes:
+      - ./docker/central-config.yaml:/app/config.yaml
+    command:
+      - "--config=/app/config.yaml"
+    ports:
+      - "4000:4000"
+    environment:
+      # Database connection
+      DATABASE_URL: "postgresql://llmproxy:dbpassword9090@db:5432/litellm"
+      STORE_MODEL_IN_DB: "True"
+      
+      # Master key for admin access
+      LITELLM_MASTER_KEY: "sk-master-key-1234567890"
+      
+      # Internal service key for remote proxies
+      LITELLM_INTERNAL_SERVICE_KEY: "sk-internal-service-key-for-remote-proxies"
+      
+      # Redis for caching
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      
+      # LLM API keys (central stores these, not remote proxies in this setup)
+      # Uncomment and set your API keys:
+      # OPENAI_API_KEY: "sk-..."
+      # ANTHROPIC_API_KEY: "sk-ant-..."
+      # AZURE_API_KEY: "..."
+      # AZURE_API_BASE: "https://your-resource.openai.azure.com"
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - litellm-network
+
+  #############################################
+  # Remote Proxy - East Region
+  # - No database access
+  # - Authenticates via central server
+  # - Reports spend to central server
+  #############################################
+  remote-proxy-east:
+    build:
+      context: .
+      args:
+        target: runtime
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm_remote_east
+    volumes:
+      - ./docker/remote-proxy-config.yaml:/app/config.yaml
+    command:
+      - "--config=/app/config.yaml"
+    ports:
+      - "4001:4000"
+    environment:
+      # Remote proxy mode configuration
+      REMOTE_PROXY_ENABLED: "true"
+      CENTRAL_SERVER_URL: "http://central:4000"
+      CENTRAL_SERVICE_KEY: "sk-internal-service-key-for-remote-proxies"
+      
+      # This proxy's identifier
+      PROXY_ID: "remote-east"
+      
+      # LLM API keys (remote proxies make their own LLM calls)
+      # Uncomment and set your API keys:
+      # OPENAI_API_KEY: "sk-..."
+      # ANTHROPIC_API_KEY: "sk-ant-..."
+    env_file:
+      - .env
+    depends_on:
+      central:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s  # Wait longer for central to be ready
+    networks:
+      - litellm-network
+
+  #############################################
+  # Remote Proxy - West Region
+  # - No database access
+  # - Authenticates via central server
+  # - Reports spend to central server
+  #############################################
+  remote-proxy-west:
+    build:
+      context: .
+      args:
+        target: runtime
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm_remote_west
+    volumes:
+      - ./docker/remote-proxy-config.yaml:/app/config.yaml
+    command:
+      - "--config=/app/config.yaml"
+    ports:
+      - "4002:4000"
+    environment:
+      # Remote proxy mode configuration
+      REMOTE_PROXY_ENABLED: "true"
+      CENTRAL_SERVER_URL: "http://central:4000"
+      CENTRAL_SERVICE_KEY: "sk-internal-service-key-for-remote-proxies"
+      
+      # This proxy's identifier
+      PROXY_ID: "remote-west"
+      
+      # LLM API keys (remote proxies make their own LLM calls)
+      # Uncomment and set your API keys:
+      # OPENAI_API_KEY: "sk-..."
+      # ANTHROPIC_API_KEY: "sk-ant-..."
+    env_file:
+      - .env
+    depends_on:
+      central:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - litellm-network
+
+  #############################################
+  # PostgreSQL Database
+  # - Only central server connects to this
+  #############################################
+  db:
+    image: postgres:16
+    restart: always
+    container_name: litellm_db
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: llmproxy
+      POSTGRES_PASSWORD: dbpassword9090
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d litellm -U llmproxy"]
+      interval: 1s
+      timeout: 5s
+      retries: 10
+    networks:
+      - litellm-network
+
+  #############################################
+  # Redis Cache
+  # - Used by central server for caching
+  # - Remote proxies use their own local cache
+  #############################################
+  redis:
+    image: redis:7-alpine
+    restart: always
+    container_name: litellm_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 5s
+      retries: 10
+    networks:
+      - litellm-network
+
+volumes:
+  postgres_data:
+    name: litellm_remote_proxy_postgres_data
+  redis_data:
+    name: litellm_remote_proxy_redis_data
+
+networks:
+  litellm-network:
+    driver: bridge

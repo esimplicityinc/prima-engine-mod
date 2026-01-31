@@ -1,0 +1,71 @@
+# Remote Proxy Configuration
+#
+# This proxy:
+# - Does NOT have database access
+# - Authenticates API keys via the central server
+# - Reports spend to the central server
+# - Fetches model configuration from the central server
+# - Caches auth results locally for performance
+
+model_list:
+  # Remote proxies need their own LLM API keys
+  # They make direct calls to LLM providers
+  - model_name: gpt-4
+    litellm_params:
+      model: openai/gpt-4
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: gpt-3.5-turbo
+    litellm_params:
+      model: openai/gpt-3.5-turbo
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: claude-3-opus
+    litellm_params:
+      model: anthropic/claude-3-opus-20240229
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+general_settings:
+  # Remote proxy mode configuration
+  remote_proxy:
+    enabled: true
+    
+    # Central management server URL
+    central_server_url: os.environ/CENTRAL_SERVER_URL
+    
+    # Service key for authenticating with central server
+    service_key: os.environ/CENTRAL_SERVICE_KEY
+    
+    # Caching settings
+    # How long to cache successful auth results (seconds)
+    auth_cache_ttl_seconds: 300
+    
+    # How often to poll central server for config changes (seconds)
+    config_poll_interval_seconds: 60
+    
+    # Fallback behavior when central server is unreachable
+    # If true, use cached auth data (up to max_cache_age_on_failure_seconds old)
+    allow_cached_auth_on_central_failure: true
+    max_cache_age_on_failure_seconds: 3600  # 1 hour
+    
+    # Disable management routes on remote proxy
+    # Users should manage keys/teams via the central server UI
+    disable_management_routes: true
+    
+    # Disable admin UI on remote proxy
+    # Admin UI is available on the central server
+    disable_ui: true
+    
+    # Spend reporting settings
+    # Records are batched and sent periodically
+    spend_report_batch_size: 100
+    spend_report_interval_seconds: 10
+
+router_settings:
+  routing_strategy: simple-shuffle
+  num_retries: 3
+  timeout: 60
+  allowed_fails: 3
+  cooldown_time: 60
+
+litellm_settings:
+  drop_params: true
+  request_timeout: 60

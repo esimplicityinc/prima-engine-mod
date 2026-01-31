@@ -469,6 +469,16 @@ from litellm.proxy.vertex_ai_endpoints.langfuse_endpoints import (
     router as langfuse_router,
 )
 from litellm.proxy.video_endpoints.endpoints import router as video_router
+
+# Internal API endpoints for remote proxy mode
+from litellm.proxy.internal_api_endpoints import internal_api_router
+from litellm.proxy.internal_api_endpoints.internal_router import is_internal_api_enabled
+from litellm.proxy.remote_proxy import (
+    initialize_remote_proxy_mode,
+    is_remote_proxy_mode,
+    shutdown_remote_proxy_mode,
+)
+
 from litellm.router import (
     AssistantsTypedDict,
     Deployment,
@@ -834,6 +844,20 @@ async def proxy_startup_event(app: FastAPI):  # noqa: PLR0915
             _run_background_health_check()
         )  # start the background health check coroutine.
 
+    ## Initialize Remote Proxy Mode (if configured)
+    # This allows the proxy to operate without direct database access
+    # by communicating with a central management server
+    remote_proxy_initialized = await initialize_remote_proxy_mode(
+        general_settings=general_settings,
+        user_api_key_cache=user_api_key_cache,
+        llm_router=llm_router,
+        scheduler=scheduler,
+    )
+    if remote_proxy_initialized:
+        verbose_proxy_logger.info(
+            "Remote proxy mode initialized - auth and spend will be handled via central server"
+        )
+
     ## [Optional] Initialize dd tracer
     ProxyStartupEvent._init_dd_tracer()
 
@@ -861,6 +885,14 @@ async def proxy_startup_event(app: FastAPI):  # noqa: PLR0915
             await prisma_client.db.stop_token_refresh_task()
         except Exception as e:
             verbose_proxy_logger.error(f"Error stopping token refresh task: {e}")
+
+    # Shutdown remote proxy mode (flush spend records, close connections)
+    if is_remote_proxy_mode():
+        try:
+            await shutdown_remote_proxy_mode()
+            verbose_proxy_logger.info("Remote proxy mode shutdown complete")
+        except Exception as e:
+            verbose_proxy_logger.error(f"Error shutting down remote proxy mode: {e}")
 
     await proxy_shutdown_event()  # type: ignore[reportGeneralTypeIssues]
 
@@ -11612,6 +11644,15 @@ app.include_router(enterprise_router)
 app.include_router(ui_discovery_endpoints_router)
 app.include_router(agent_endpoints_router)
 app.include_router(a2a_router)
+
+########################################################
+# Internal API Endpoints (for remote proxy mode)
+########################################################
+# Only mount internal API endpoints if service keys are configured
+if is_internal_api_enabled():
+    app.include_router(internal_api_router)
+    verbose_proxy_logger.info("Internal API endpoints enabled for remote proxy mode")
+
 ########################################################
 # MCP Server
 ########################################################

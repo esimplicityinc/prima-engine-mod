@@ -52,6 +52,10 @@ from litellm.proxy.auth.auth_utils import (
 from litellm.proxy.auth.handle_jwt import JWTAuthManager, JWTHandler
 from litellm.proxy.auth.oauth2_check import Oauth2Handler
 from litellm.proxy.auth.oauth2_proxy_hook import handle_oauth2_proxy_request
+from litellm.proxy.auth.remote_auth_handler import (
+    get_remote_auth_handler,
+    remote_auth_validate_key,
+)
 from litellm.proxy.auth.route_checks import RouteChecks
 from litellm.proxy.common_utils.cache_coordinator import EventDrivenCacheCoordinator
 from litellm.proxy.common_utils.http_parsing_utils import (
@@ -470,6 +474,26 @@ async def _user_api_key_auth_builder(  # noqa: PLR0915
         elif user_custom_auth is not None:
             response = await user_custom_auth(request=request, api_key=api_key)  # type: ignore
             return UserAPIKeyAuth.model_validate(response)
+
+        ### REMOTE PROXY AUTH ###
+        # If running in remote proxy mode, delegate auth to central server
+        remote_auth_handler = get_remote_auth_handler()
+        if remote_auth_handler is not None:
+            # Get model from request body if available
+            request_model = None
+            if request_data:
+                request_model = request_data.get("model")
+            
+            # Validate key via central server
+            remote_auth_result = await remote_auth_handler.validate_key(
+                api_key=api_key,
+                route=route,
+                model=request_model,
+                end_user_id=request_data.get("user") if request_data else None,
+            )
+            if remote_auth_result is not None:
+                remote_auth_result.parent_otel_span = parent_otel_span
+                return remote_auth_result
 
         ### LITELLM-DEFINED AUTH FUNCTION ###
         #### IF JWT ####
