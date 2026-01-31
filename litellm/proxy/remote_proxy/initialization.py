@@ -99,11 +99,26 @@ def _parse_remote_proxy_settings(
             )
 
     # Check for environment variable-based settings
+    # Support both REMOTE_PROXY_* and CENTRAL_* prefixes for flexibility
     if os.environ.get("REMOTE_PROXY_ENABLED", "").lower() == "true":
+        # Get central URL (support multiple env var names)
+        central_url = (
+            os.environ.get("REMOTE_PROXY_CENTRAL_URL") or
+            os.environ.get("CENTRAL_SERVER_URL") or
+            ""
+        )
+        
+        # Get service key (support multiple env var names)
+        service_key = (
+            os.environ.get("REMOTE_PROXY_SERVICE_KEY") or
+            os.environ.get("CENTRAL_SERVICE_KEY") or
+            ""
+        )
+        
         return RemoteProxySettings(
             enabled=True,
-            central_server_url=os.environ.get("REMOTE_PROXY_CENTRAL_URL", ""),
-            service_key=os.environ.get("REMOTE_PROXY_SERVICE_KEY", ""),
+            central_server_url=central_url,
+            service_key=service_key,
             auth_cache_ttl_seconds=int(
                 os.environ.get("REMOTE_PROXY_AUTH_CACHE_TTL", "300")
             ),

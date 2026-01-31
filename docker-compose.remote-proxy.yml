@@ -8,8 +8,8 @@
 # Usage:
 #   docker-compose -f docker-compose.remote-proxy.yml up
 #
-# The central server is accessible at http://localhost:4000
-# Remote proxies are accessible at http://localhost:4001 and http://localhost:4002
+# The central server is accessible at http://localhost:4010
+# Remote proxies are accessible at http://localhost:4011 and http://localhost:4012
 
 services:
   #############################################
@@ -27,10 +27,12 @@ services:
     container_name: litellm_central
     volumes:
       - ./docker/central-config.yaml:/app/config.yaml
+      # Mount local litellm code to test our changes
+      - ./litellm:/usr/lib/python3.13/site-packages/litellm
     command:
       - "--config=/app/config.yaml"
     ports:
-      - "4000:4000"
+      - "4010:4000"  # External 4010 to avoid conflicts
     environment:
       # Database connection
       DATABASE_URL: "postgresql://llmproxy:dbpassword9090@db:5432/litellm"
@@ -85,10 +87,11 @@ services:
     container_name: litellm_remote_east
     volumes:
       - ./docker/remote-proxy-config.yaml:/app/config.yaml
+      - ./litellm:/usr/lib/python3.13/site-packages/litellm
     command:
       - "--config=/app/config.yaml"
     ports:
-      - "4001:4000"
+      - "4011:4000"  # External 4011 to avoid conflicts
     environment:
       # Remote proxy mode configuration
       REMOTE_PROXY_ENABLED: "true"
@@ -133,10 +136,11 @@ services:
     container_name: litellm_remote_west
     volumes:
       - ./docker/remote-proxy-config.yaml:/app/config.yaml
+      - ./litellm:/usr/lib/python3.13/site-packages/litellm
     command:
       - "--config=/app/config.yaml"
     ports:
-      - "4002:4000"
+      - "4012:4000"  # External 4012 to avoid conflicts
     environment:
       # Remote proxy mode configuration
       REMOTE_PROXY_ENABLED: "true"
@@ -198,7 +202,7 @@ services:
     restart: always
     container_name: litellm_redis
     ports:
-      - "6379:6379"
+      - "6380:6379"  # External 6380 to avoid conflict with existing Redis
     volumes:
       - redis_data:/data
     healthcheck:

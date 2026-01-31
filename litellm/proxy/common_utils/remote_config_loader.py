@@ -208,8 +208,8 @@ async def load_models_from_central(
                     model_info=model_config.get("model_info", {}),
                 )
 
-                # Upsert to router
-                await llm_router.upsert_deployment(deployment=deployment)
+                # Upsert to router (sync method)
+                llm_router.upsert_deployment(deployment=deployment)
                 added += 1
 
             except Exception as e:

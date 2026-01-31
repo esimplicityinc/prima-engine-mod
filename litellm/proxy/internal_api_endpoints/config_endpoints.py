@@ -32,21 +32,35 @@ def _sanitize_litellm_params(params: Dict[str, Any]) -> Dict[str, Any]:
     to send the central server's keys. We only send routing information.
     """
     # Fields to exclude from remote proxies (they have their own credentials)
-    sensitive_fields = [
+    sensitive_fields = {
         "api_key",
         "aws_access_key_id",
         "aws_secret_access_key",
         "vertex_credentials",
         "azure_ad_token",
-    ]
+    }
+    
+    # Internal fields that should not be passed to LLM providers
+    internal_fields = {
+        "_api_key_configured",
+        "_aws_access_key_id_configured",
+        "_aws_secret_access_key_configured",
+        "_vertex_credentials_configured",
+        "_azure_ad_token_configured",
+        "use_in_pass_through",
+        "use_litellm_proxy",
+        "merge_reasoning_content_in_choices",
+    }
 
     sanitized = {}
     for key, value in params.items():
+        # Skip sensitive credential fields
         if key in sensitive_fields:
-            # Mark that a key exists but don't send the value
-            sanitized[f"_{key}_configured"] = True
-        else:
-            sanitized[key] = value
+            continue
+        # Skip internal marker fields
+        if key in internal_fields:
+            continue
+        sanitized[key] = value
 
     return sanitized
 
